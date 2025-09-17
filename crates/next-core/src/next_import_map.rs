@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, sync::LazyLock};
 
-use anyhow::{Context, Result};
+use anyhow::{Result, bail};
 use either::Either;
 use rustc_hash::FxHashMap;
 use turbo_rcstr::{RcStr, rcstr};
@@ -1237,15 +1237,25 @@ async fn insert_next_shared_aliases(
 pub async fn get_next_package(context_directory: FileSystemPath) -> Result<Vc<FileSystemPath>> {
     let root = context_directory.root().owned().await?;
     let result = resolve(
-        context_directory,
+        context_directory.clone(),
         ReferenceType::CommonJs(CommonJsReferenceSubType::Undefined),
         Request::parse(Pattern::Constant(rcstr!("next/package.json"))),
         node_cjs_resolve_options(root),
     );
-    let source = result
-        .first_source()
-        .await?
-        .context("Next.js package not found")?;
+    let source = match *result.first_source().await? {
+        Some(s) => s,
+        None => {
+            let ctx_path = context_directory.to_string();
+            bail!(
+                "Warning: Next.js inferred your workspace root, but it may not be correct.\n \
+ We couldn't find the Next.js package (next/package.json) from the context directory: {}.\n \
+ To fix this, set `turbopack.root` in your Next.js config, or ensure the Next.js package is resolvable from this directory.\n \
+ Note: For security and performance reasons, files symlinked from outside the context directory may not be followed or may not work as expected.\n \
+   See https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#root-directory for more information.\n",
+                ctx_path
+            );
+        }
+    };
     Ok(source.ident().path().await?.parent().cell())
 }
 

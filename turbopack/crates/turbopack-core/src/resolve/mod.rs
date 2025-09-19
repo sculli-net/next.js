@@ -15,7 +15,7 @@ use turbo_tasks::{
     FxIndexMap, FxIndexSet, NonLocalValue, ReadRef, ResolvedVc, SliceMap, TaskInput,
     TryJoinIterExt, ValueToString, Vc, trace::TraceRawVcs,
 };
-use turbo_tasks_fs::{FileSystemEntryType, FileSystemPath};
+use turbo_tasks_fs::{FileSystemEntryType, FileSystemPath, RealPathResult, RealPathResultError};
 use turbo_unix_path::normalize_request;
 
 use self::{
@@ -34,7 +34,8 @@ use crate::{
     data_uri_source::DataUriSource,
     file_source::FileSource,
     issue::{
-        IssueExt, IssueSource, module::emit_unknown_module_type_error, resolve::ResolvingIssue,
+        Issue, IssueExt, IssueSource, IssueStage, StyledString,
+        module::emit_unknown_module_type_error, resolve::ResolvingIssue,
     },
     module::{Module, Modules, OptionModule},
     output::{OutputAsset, OutputAssets},
@@ -1168,6 +1169,39 @@ async fn type_exists(
     })
 }
 
+#[turbo_tasks::value(shared)]
+struct InvalidSymlinkIssue {
+    path: FileSystemPath,
+    err: RealPathResultError,
+    error_message: String,
+}
+
+#[turbo_tasks::value_impl]
+impl Issue for InvalidSymlinkIssue {
+    #[turbo_tasks::function]
+    fn file_path(&self) -> Vc<FileSystemPath> {
+        *self.path.clone().resolved_cell()
+    }
+
+    fn severity(&self) -> IssueSeverity {
+        IssueSeverity::Fatal
+    }
+
+    #[turbo_tasks::function]
+    fn stage(&self) -> Vc<IssueStage> {
+        IssueStage::Resolve.into()
+    }
+
+    #[turbo_tasks::function]
+    async fn title(&self) -> Result<Vc<StyledString>> {
+        Ok(StyledString::Stack(vec![
+            StyledString::Strong("I'M AN ERROR".into()),
+            StyledString::Text(self.error_message.clone().into()),
+        ])
+        .cell())
+    }
+}
+
 async fn realpath(
     fs_path: &FileSystemPath,
     refs: &mut Vec<ResolvedVc<Box<dyn Source>>>,
@@ -1187,7 +1221,18 @@ async fn realpath(
     );
     match &result.path_result {
         Ok(path) => Ok(path.clone()),
-        Err(e) => bail!(e.as_error_message(fs_path, &result)),
+        Err(e) => {
+            println!("I've hit an error");
+            let err_message = e.as_error_message(fs_path, &result);
+            InvalidSymlinkIssue {
+                path: fs_path.clone(),
+                err: e.clone(),
+                error_message: err_message.clone(),
+            }
+            .resolved_cell()
+            .emit();
+            Err(anyhow::anyhow!(err_message))
+        }
     }
 }
 

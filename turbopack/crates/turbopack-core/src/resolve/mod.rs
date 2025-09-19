@@ -15,7 +15,7 @@ use turbo_tasks::{
     FxIndexMap, FxIndexSet, NonLocalValue, ReadRef, ResolvedVc, SliceMap, TaskInput,
     TryJoinIterExt, ValueToString, Vc, trace::TraceRawVcs,
 };
-use turbo_tasks_fs::{FileSystemEntryType, FileSystemPath, RealPathResult, RealPathResultError};
+use turbo_tasks_fs::{FileSystemEntryType, FileSystemPath, RealPathResultError};
 use turbo_unix_path::normalize_request;
 
 use self::{
